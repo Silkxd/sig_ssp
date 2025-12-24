@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #1e3a8a; /* Blue 900 */
+  --color-primary-light: #3b82f6; /* Blue 500 */
+  --color-secondary: #64748b; /* Slate 500 */
+  --color-accent: #0ea5e9; /* Sky 500 */
+}
+
+/* Leaflet Map Container */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  z-index: 10;
+}
