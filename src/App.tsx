@@ -4,6 +4,7 @@ import { Sidebar } from './components/Sidebar';
 import { MapViewer } from './components/MapViewer';
 import { DbService } from './utils/DbService';
 import { useMapStore } from './store/useMapStore';
+import { GlobalModalRenderer } from './components/GlobalModalRenderer';
 
 function App() {
   const { addLayer } = useMapStore();
@@ -27,6 +28,7 @@ function App() {
       <Sidebar />
       <div className="flex-1 h-full relative">
         <MapViewer />
+        <GlobalModalRenderer />
       </div>
     </div>
   );

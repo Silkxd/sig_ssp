@@ -24,7 +24,7 @@ export const FieldSelectionModal: React.FC<FieldSelectionModalProps> = ({
                 <div className="p-4 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
                     <h3 className="font-semibold text-slate-800 flex items-center gap-2">
                         <ListFilter size={18} className="text-primary" />
-                        Classify Layer: <span className="text-primary truncate max-w-[150px]">{layerName}</span>
+                        Classificar Camada: <span className="text-primary truncate max-w-[150px]">{layerName}</span>
                     </h3>
                     <button
                         onClick={onClose}
@@ -36,12 +36,12 @@ export const FieldSelectionModal: React.FC<FieldSelectionModalProps> = ({
 
                 <div className="p-4 max-h-[60vh] overflow-y-auto">
                     <p className="text-sm text-slate-500 mb-4">
-                        Select a field to classify features by. Unique colors will be assigned to each value.
+                        Selecione um campo para classificar os recursos. Cores únicas serão atribuídas a cada valor.
                     </p>
 
                     {fields.length === 0 ? (
                         <div className="text-center py-8 text-slate-400">
-                            No properties found for this layer.
+                            Nenhuma propriedade encontrada.
                         </div>
                     ) : (
                         <div className="grid gap-2">
@@ -52,7 +52,7 @@ export const FieldSelectionModal: React.FC<FieldSelectionModalProps> = ({
                                     className="text-left px-4 py-3 rounded-lg border border-slate-200 hover:border-primary hover:bg-slate-50 hover:text-primary transition-all flex items-center justify-between group"
                                 >
                                     <span className="font-medium text-slate-700 group-hover:text-primary">{field}</span>
-                                    <span className="text-xs text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity uppercase tracking-wider">Select</span>
+                                    <span className="text-xs text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity uppercase tracking-wider">Selecionar</span>
                                 </button>
                             ))}
                         </div>
@@ -60,7 +60,7 @@ export const FieldSelectionModal: React.FC<FieldSelectionModalProps> = ({
                 </div>
 
                 <div className="p-3 bg-slate-50 border-t border-slate-100 text-xs text-center text-slate-400">
-                    Showing {fields.length} available fields
+                    Mostrando {fields.length} campos disponíveis
                 </div>
             </div>
         </div>

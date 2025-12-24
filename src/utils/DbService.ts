@@ -7,7 +7,7 @@ export const DbService = {
      * Saves a GeoJSON FeatureCollection to the database.
      * Creates a 'collection' record and then inserts 'features'.
      */
-    async saveLayerToDatabase(name: string, geojson: FeatureCollection, metadata: any = {}) {
+    async saveLayerToDatabase(name: string, geojson: FeatureCollection, metadata: any = {}, groupId: string | null = null) {
         try {
             // 1. Create Collection
             const { data: collection, error: collectionError } = await supabase
@@ -15,6 +15,7 @@ export const DbService = {
                 .insert({
                     name,
                     metadata,
+                    group_id: groupId
                 })
                 .select()
                 .single();
@@ -29,8 +30,6 @@ export const DbService = {
             }));
 
             // 3. Insert Features (Batch)
-            // Note: Supabase might have a limit on request size. 
-            // For large files, we might need chunking. 
             const { error: featuresError } = await supabase
                 .from('features')
                 .insert(features);
@@ -40,6 +39,7 @@ export const DbService = {
             // Cache the new layer immediately
             await CacheService.set(collection.id, {
                 id: collection.id,
+                groupId: groupId,
                 name: collection.name,
                 data: geojson,
                 visible: true,
@@ -51,7 +51,7 @@ export const DbService = {
 
             return collection;
         } catch (error) {
-            console.error('Error saving layer to database:', error);
+            console.error('Erro ao salvar camada no banco de dados:', error);
             throw error;
         }
     },
@@ -77,17 +77,22 @@ export const DbService = {
                     const cachedLayer = await CacheService.get(col.id);
                     // Verify cache integrity (e.g., check if cached style matches DB style)
                     if (cachedLayer) {
-                        // Optional: Compare metadata timestamps if implemented, for now assume cache is good unless style changed
+                        // CRITICAL FIX: Always update groupId from the fresh DB collection record
+                        // because the cache might be stale or from before grouping was implemented.
+                        const updatedLayer = {
+                            ...cachedLayer,
+                            groupId: col.group_id // Force update from DB
+                        };
+
                         // Simple sync check: Ensure cached style matches current DB metadata style
                         if (JSON.stringify(cachedLayer.style) === JSON.stringify(col.metadata?.style)) {
-                            return { ...cachedLayer, visible: true }; // Return cached version
+                            return { ...updatedLayer, visible: true };
                         }
-                        // If logic differs (e.g. style updated by another user), we might want to re-fetch or just update style.
-                        // For simplicity/robustness: If simple check fails, or just always update style:
-                        return { ...cachedLayer, style: col.metadata?.style, visible: true };
+
+                        return { ...updatedLayer, style: col.metadata?.style, visible: true };
                     }
                 } catch (e) {
-                    console.warn('Cache read error, falling back to network', e);
+                    console.warn('Erro de leitura do cache, voltando para a rede', e);
                 }
 
                 // B. Fallback: Fetch Features from Network
@@ -97,7 +102,7 @@ export const DbService = {
                     .eq('collection_id', col.id);
 
                 if (featuresError) {
-                    console.error(`Error fetching features for collection ${col.id}:`, featuresError);
+                    console.error(`Erro ao buscar feições para a coleção ${col.id}:`, featuresError);
                     return null;
                 }
 
@@ -113,6 +118,7 @@ export const DbService = {
 
                 const newLayer = {
                     id: col.id,
+                    groupId: col.group_id, // Load group association
                     name: col.name,
                     data: geojson,
                     visible: true,
@@ -131,7 +137,7 @@ export const DbService = {
             const layers = (await Promise.all(layerPromises)).filter(Boolean);
             return layers;
         } catch (error) {
-            console.error('Error fetching saved layers:', error);
+            console.error('Erro ao buscar camadas salvas:', error);
             return [];
         }
     },
@@ -154,7 +160,7 @@ export const DbService = {
 
             return true;
         } catch (error) {
-            console.error('Error deleting layer:', error);
+            console.error('Erro ao excluir camada:', error);
             throw error;
         }
     },
@@ -194,8 +200,52 @@ export const DbService = {
 
             return true;
         } catch (error) {
-            console.error('Error updating layer style:', error);
+            console.error('Erro ao atualizar estilo da camada:', error);
             throw error;
         }
+    },
+
+    // --- Group Persistence Methods ---
+
+    async getGroups() {
+        const { data, error } = await supabase
+            .from('layer_groups')
+            .select('*')
+            .order('created_at', { ascending: true });
+
+        if (error) {
+            console.error('Erro ao buscar grupos:', error);
+            return [];
+        }
+        return data || [];
+    },
+
+    async createGroup(name: string) {
+        const { data, error } = await supabase
+            .from('layer_groups')
+            .insert({ name })
+            .select()
+            .single();
+
+        if (error) throw error;
+        return data;
+    },
+
+    async deleteGroup(groupId: string) {
+        const { error } = await supabase
+            .from('layer_groups')
+            .delete()
+            .eq('id', groupId);
+
+        if (error) throw error;
+    },
+
+    async updateLayerGroup(layerId: string, groupId: string | null) {
+        const { error } = await supabase
+            .from('collections')
+            .update({ group_id: groupId })
+            .eq('id', layerId);
+
+        if (error) throw error;
     }
 };

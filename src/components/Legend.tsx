@@ -5,7 +5,7 @@ import { ChevronDown, ChevronUp, Palette, Save } from 'lucide-react';
 // The original DbService import from '../services/DbService' is removed as per the instruction's implied replacement.
 
 export const Legend: React.FC = () => {
-    const { layers } = useMapStore();
+    const { layers, openModal } = useMapStore();
     const [minimized, setMinimized] = useState(false);
     const [saving, setSaving] = useState(false);
 
@@ -15,25 +15,36 @@ export const Legend: React.FC = () => {
 
     if (classifiedLayers.length === 0) return null;
 
+    // ... filtering code ...
+
     const handleSaveStyle = async (layer: any) => {
         if (layer.type !== 'database') {
-            alert('You must save the layer to the database first before saving its style.');
+            openModal({
+                type: 'alert',
+                title: 'Atenção',
+                message: 'Você deve salvar a camada no banco de dados antes de salvar seu estilo.',
+                variant: 'default'
+            });
             return;
         }
 
-        const confirmed = window.confirm(`Save current classification style for "${layer.name}"? This style will load by default.`);
-        if (!confirmed) return;
-
-        setSaving(true);
-        try {
-            await DbService.updateLayerStyle(layer.id, layer.style);
-            alert('Style saved successfully!');
-        } catch (error) {
-            console.error(error);
-            alert('Failed to save style.');
-        } finally {
-            setSaving(false);
-        }
+        openModal({
+            type: 'confirm',
+            title: 'Salvar Estilo',
+            message: `Salvar estilo de classificação atual para "${layer.name}"? Este estilo será carregado por padrão.`,
+            onConfirm: async () => {
+                setSaving(true);
+                try {
+                    await DbService.updateLayerStyle(layer.id, layer.style);
+                    openModal({ type: 'alert', title: 'Sucesso', message: 'Estilo salvo com sucesso!' });
+                } catch (error) {
+                    console.error(error);
+                    openModal({ type: 'alert', title: 'Erro', message: 'Falha ao salvar estilo.', variant: 'danger' });
+                } finally {
+                    setSaving(false);
+                }
+            }
+        });
     };
 
     return (
@@ -41,7 +52,7 @@ export const Legend: React.FC = () => {
             <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-100">
                 <h3 className="font-semibold text-sm text-slate-700 flex items-center gap-2">
                     <Palette size={16} />
-                    Legend
+                    Legenda
                 </h3>
                 <div className="flex items-center gap-1">
                     <button
@@ -64,13 +75,13 @@ export const Legend: React.FC = () => {
                                         onClick={() => handleSaveStyle(layer)}
                                         disabled={saving}
                                         className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-slate-400 hover:text-green-600"
-                                        title="Save Style to Database"
+                                        title="Salvar Estilo no Banco"
                                     >
                                         <Save size={14} />
                                     </button>
                                 )}
                             </div>
-                            <p className="text-xs text-slate-400 mb-2">Field: {layer.style?.field}</p>
+                            <p className="text-xs text-slate-400 mb-2">Campo: {layer.style?.field}</p>
 
                             <div className="space-y-1">
                                 {Object.entries(layer.style?.classMap || {}).map(([val, color]) => (
@@ -90,7 +101,7 @@ export const Legend: React.FC = () => {
 
             {minimized && (
                 <div className="text-xs text-slate-400">
-                    {classifiedLayers.length} active layer(s)
+                    {classifiedLayers.length} camada(s) ativa(s)
                 </div>
             )}
         </div>

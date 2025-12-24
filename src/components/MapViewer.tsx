@@ -1,8 +1,14 @@
-import React, { useEffect } from 'react';
-import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet';
+import React, { useEffect, useMemo } from 'react';
+import { MapContainer, TileLayer, GeoJSON, useMap, Marker, Popup } from 'react-leaflet';
+import MarkerClusterGroup from 'react-leaflet-cluster';
 import { useMapStore } from '../store/useMapStore';
 import { Legend } from './Legend';
 import 'leaflet/dist/leaflet.css';
+// Leaflet MarkerCluster CSS (Note: these files might need to be resolved from node_modules)
+// Usually bundled with the library or we need to simple add styles if they are missing.
+// Trying standard imports for leaflet.markercluster if installed as dependency of react-leaflet-cluster.
+import 'leaflet.markercluster/dist/MarkerCluster.css';
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import L from 'leaflet';
 
 // Fix for default marker icons in Leaflet with Webpack/Vite
@@ -16,6 +22,16 @@ let DefaultIcon = L.icon({
 });
 
 L.Marker.prototype.options.icon = DefaultIcon;
+
+// Helper to create custom colored icons
+const createCustomIcon = (color: string) => {
+    return L.divIcon({
+        className: 'custom-marker-icon',
+        html: `<div style="background-color: ${color}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.4);"></div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+    });
+};
 
 const MapController = () => {
     const map = useMap();
@@ -35,6 +51,7 @@ const MapController = () => {
         const layer = layers.find(l => l.id === focusedLayerId);
         if (layer && layer.data) {
             try {
+                // For bounds, we still use L.geoJSON interpretation
                 const geoJsonLayer = L.geoJSON(layer.data);
                 const bounds = geoJsonLayer.getBounds();
                 if (bounds.isValid()) {
@@ -55,9 +72,6 @@ const MapController = () => {
             const bounds = geoJsonLayer.getBounds();
             if (bounds.isValid()) {
                 map.fitBounds(bounds, { padding: [100, 100], maxZoom: 18 });
-
-                // Optional: Open popup if available
-                // detailed implementation would require reference to the actual layer instance
             }
         } catch (e) {
             console.error("Error focusing on feature:", e);
@@ -79,7 +93,6 @@ export const MapViewer: React.FC = () => {
 
         if (layer.style?.type === 'categorized' && layer.style.field && layer.style.classMap) {
             const val = feature.properties?.[layer.style.field];
-            // Handle 0, false, etc. correctly
             if (val !== undefined && val !== null) {
                 const strVal = String(val);
                 if (layer.style.classMap[strVal]) {
@@ -89,12 +102,26 @@ export const MapViewer: React.FC = () => {
         }
 
         return {
-            color: layer.color, // Border color keeps the main color
+            color: layer.color, // Border color
             weight: 2,
             opacity: layer.opacity,
             fillColor: fillColor,
-            fillOpacity: layer.opacity * 0.5, // slightly more opaque for filled polygons
+            fillOpacity: layer.opacity * 0.5,
         };
+    };
+
+    const getPointColor = (feature: any, layer: any) => {
+        let color = layer.color;
+        if (layer.style?.type === 'categorized' && layer.style.field && layer.style.classMap) {
+            const val = feature.properties?.[layer.style.field];
+            if (val !== undefined && val !== null) {
+                const strVal = String(val);
+                if (layer.style.classMap[strVal]) {
+                    color = layer.style.classMap[strVal];
+                }
+            }
+        }
+        return color;
     };
 
     const onEachFeature = (feature: any, layer: L.Layer) => {
@@ -106,6 +133,28 @@ export const MapViewer: React.FC = () => {
         }
     };
 
+    // Split layers into points (for clustering) and others (lines/polygons)
+    const { pointLayers, otherLayers } = useMemo(() => {
+        const pointLayers: any[] = [];
+        const otherLayers: any[] = [];
+
+        layers.forEach(layer => {
+            if (!layer.visible || !layer.data) return;
+
+            // Simple heuristic check: if the first feature is a Point, treat whole layer as points
+            // ideally we should filter features inside the layer, but for simplicity we assume homogeneous layers usually
+            const isPoint = layer.data.features.some(f => f.geometry.type === 'Point' || f.geometry.type === 'MultiPoint');
+
+            if (isPoint) {
+                pointLayers.push(layer);
+            } else {
+                otherLayers.push(layer);
+            }
+        });
+
+        return { pointLayers, otherLayers };
+    }, [layers]);
+
     return (
         <MapContainer
             center={[-15.7942, -47.8822]} // Brasilia default
@@ -115,21 +164,53 @@ export const MapViewer: React.FC = () => {
         >
             <MapController />
             <Legend />
-            <TileLayer
-                attribution={attribution}
-                url={tileUrl}
-            />
+            <TileLayer attribution={attribution} url={tileUrl} />
 
-            {layers.map((layer) => (
-                layer.visible && layer.data && (
-                    <GeoJSON
-                        key={layer.id} // Important for updates
-                        data={layer.data}
-                        style={(feature) => getFeatureStyle(feature, layer)}
-                        onEachFeature={onEachFeature}
-                    />
-                )
+            {/* Render non-point layers normally */}
+            {otherLayers.map((layer) => (
+                <GeoJSON
+                    key={layer.id}
+                    data={layer.data}
+                    style={(feature) => getFeatureStyle(feature, layer)}
+                    onEachFeature={onEachFeature}
+                />
             ))}
+
+            {/* Render point layers with clustering */}
+            {pointLayers.length > 0 && (
+                <MarkerClusterGroup
+                    chunkedLoading
+                    maxClusterRadius={60}
+                    spiderfyOnMaxZoom={true}
+                >
+                    {pointLayers.map(layer => (
+                        layer.data.features.map((feature: any, index: number) => {
+                            if (feature.geometry.type !== 'Point') return null;
+
+                            // Extract coordinates
+                            const [lng, lat] = feature.geometry.coordinates;
+                            const color = getPointColor(feature, layer);
+
+                            return (
+                                <Marker
+                                    key={`${layer.id}-${index}`}
+                                    position={[lat, lng]}
+                                    icon={createCustomIcon(color)}
+                                >
+                                    <Popup>
+                                        <div dangerouslySetInnerHTML={{
+                                            __html: Object.entries(feature.properties || {})
+                                                .map(([key, value]) => `<strong>${key}:</strong> ${value}`)
+                                                .join('<br/>')
+                                        }} />
+                                    </Popup>
+                                </Marker>
+                            );
+                        })
+                    ))}
+                </MarkerClusterGroup>
+            )}
         </MapContainer>
     );
 };
+
