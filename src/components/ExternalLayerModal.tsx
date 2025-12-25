@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { Database, X, Loader2, AlertCircle, ChevronRight, CheckCircle, ArrowLeft } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Database, X, Loader2, AlertCircle, ChevronRight, CheckCircle, ArrowLeft, History } from 'lucide-react';
 import { ProxyService } from '../utils/ProxyService';
+import { DbService } from '../utils/DbService';
 import { useMapStore } from '../store/useMapStore';
 
 interface ExternalLayerModalProps {
@@ -33,6 +34,31 @@ export const ExternalLayerModal: React.FC<ExternalLayerModalProps> = ({ isOpen, 
     const [schemas, setSchemas] = useState<string[]>([]);
     const [tables, setTables] = useState<string[]>([]);
     const [columns, setColumns] = useState<any[]>([]);
+
+    // Saved Connections
+    const [savedConnections, setSavedConnections] = useState<any[]>([]);
+
+    useEffect(() => {
+        if (isOpen) {
+            loadSavedConnections();
+        }
+    }, [isOpen]);
+
+    const loadSavedConnections = async () => {
+        const conns = await DbService.getSavedConnections();
+        setSavedConnections(conns);
+    };
+
+    const handleLoadConnection = (conn: any) => {
+        setConfig(prev => ({
+            ...prev,
+            host: conn.host,
+            port: conn.port,
+            user: conn.user,
+            password: conn.password, // Note: Password stored plainly as per request
+            database: conn.database
+        }));
+    };
 
     if (!isOpen) return null;
 
@@ -115,6 +141,11 @@ export const ExternalLayerModal: React.FC<ExternalLayerModalProps> = ({ isOpen, 
             const geojson = await ProxyService.fetchExternalLayer(config);
 
             if (geojson && geojson.features && geojson.features.length > 0) {
+                // ADDED: Save Connection for future reuse
+                await DbService.saveConnection(config);
+                // Refresh list if user stays on screen (though we close modal)
+                loadSavedConnections();
+
                 addLayer({
                     id: crypto.randomUUID(),
                     name: config.layerName || config.table,
@@ -166,6 +197,30 @@ export const ExternalLayerModal: React.FC<ExternalLayerModalProps> = ({ isOpen, 
 
                     {step === 1 && (
                         <div className="space-y-4">
+                            {/* Saved Connections */}
+                            {savedConnections.length > 0 && (
+                                <div className="mb-4">
+                                    <label className="text-xs font-semibold text-slate-500 uppercase flex items-center gap-1 mb-2">
+                                        <History size={14} /> Conexões Recentes
+                                    </label>
+                                    <select
+                                        onChange={(e) => {
+                                            const conn = savedConnections.find(c => c.id === e.target.value);
+                                            if (conn) handleLoadConnection(conn);
+                                        }}
+                                        className="w-full p-2 border border-slate-200 rounded text-sm bg-slate-50 text-slate-700"
+                                    >
+                                        <option value="">Selecione uma conexão salva...</option>
+                                        {savedConnections.map(c => (
+                                            <option key={c.id} value={c.id}>
+                                                {c.name || `${c.user}@${c.host}/${c.database}`} ({new Date(c.last_used_at).toLocaleDateString()})
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <div className="my-4 border-t border-slate-100"></div>
+                                </div>
+                            )}
+
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-1">
                                     <label className="text-xs font-semibold text-slate-500 uppercase">Host</label>

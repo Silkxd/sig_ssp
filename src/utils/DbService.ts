@@ -276,5 +276,39 @@ export const DbService = {
             .eq('id', layerId);
 
         if (error) throw error;
+    },
+
+    // --- Saved Connections Methods ---
+
+    async getSavedConnections() {
+        const { data, error } = await supabase
+            .from('saved_connections')
+            .select('*')
+            .order('last_used_at', { ascending: false });
+
+        if (error) {
+            console.error('Erro ao buscar conexões salvas:', error);
+            return [];
+        }
+        return data || [];
+    },
+
+    async saveConnection(config: any) {
+        // Upsert based on unique constraint (host, port, user, database)
+        const payload = {
+            host: config.host,
+            port: config.port,
+            user: config.user,
+            password: config.password,
+            database: config.database,
+            name: `${config.user}@${config.host}/${config.database}`,
+            last_used_at: new Date().toISOString()
+        };
+
+        const { error } = await supabase
+            .from('saved_connections')
+            .upsert(payload, { onConflict: 'host, port, user, database' });
+
+        if (error) console.error('Erro ao salvar conexão:', error);
     }
 };

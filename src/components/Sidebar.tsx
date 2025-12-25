@@ -22,7 +22,6 @@ export const Sidebar: React.FC = () => {
     const [loading, setLoading] = useState(false);
 
     // Modal & Editor States
-    const [groupModalOpen, setGroupModalOpen] = useState(false);
     const [styleModalOpen, setStyleModalOpen] = useState(false);
     const [fieldModalOpen, setFieldModalOpen] = useState(false);
     const [selectedLayer, setSelectedLayer] = useState<MapLayer | null>(null);

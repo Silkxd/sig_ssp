@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useMapStore } from '../store/useMapStore';
 import { Modal } from './ui/Modal';
 import { AlertCircle, Check } from 'lucide-react';
