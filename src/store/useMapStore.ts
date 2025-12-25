@@ -17,10 +17,14 @@ export interface MapLayer {
     opacity: number;
     color: string;
     type: 'upload' | 'database';
+    connectionConfig?: any;
     style?: {
-        type: 'simple' | 'categorized';
+        type: 'simple' | 'categorized' | 'border-only';
         field?: string;
         classMap?: Record<string, string>;
+        color?: string; // For explicit style color storage
+        weight?: number; // Border thickness
+        borderColor?: string; // Global border color for classification
     };
 }
 
@@ -34,6 +38,7 @@ interface MapState {
     toggleLayerVisibility: (id: string) => void;
     setLayerOpacity: (id: string, opacity: number) => void;
     updateLayerColor: (id: string, color: string) => void;
+    setLayerStyle: (id: string, style: MapLayer['style']) => void;
     classifyLayer: (id: string, field: string) => void;
     setLayers: (layers: MapLayer[]) => void;
     moveLayerToGroup: (layerId: string, groupId: string | null) => void;
@@ -128,7 +133,13 @@ export const useMapStore = create<MapState>((set) => ({
     updateLayerColor: (id, color) =>
         set((state) => ({
             layers: state.layers.map((l) =>
-                l.id === id ? { ...l, color } : l
+                l.id === id ? { ...l, color, style: { type: 'simple', color } } : l
+            ),
+        })),
+    setLayerStyle: (id, style) =>
+        set((state) => ({
+            layers: state.layers.map((l) =>
+                l.id === id ? { ...l, style } : l
             ),
         })),
     classifyLayer: (id, field) =>

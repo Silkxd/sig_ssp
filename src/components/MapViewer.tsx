@@ -2,7 +2,6 @@ import React, { useEffect, useMemo } from 'react';
 import { MapContainer, TileLayer, GeoJSON, useMap, Marker, Popup } from 'react-leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import { useMapStore } from '../store/useMapStore';
-import { Legend } from './Legend';
 import 'leaflet/dist/leaflet.css';
 // Leaflet MarkerCluster CSS (Note: these files might need to be resolved from node_modules)
 // Usually bundled with the library or we need to simple add styles if they are missing.
@@ -90,6 +89,7 @@ export const MapViewer: React.FC = () => {
 
     const getFeatureStyle = (feature: any, layer: any) => {
         let fillColor = layer.color;
+        let fillOpacity = layer.opacity * 0.5;
 
         if (layer.style?.type === 'categorized' && layer.style.field && layer.style.classMap) {
             const val = feature.properties?.[layer.style.field];
@@ -99,14 +99,17 @@ export const MapViewer: React.FC = () => {
                     fillColor = layer.style.classMap[strVal];
                 }
             }
+        } else if (layer.style?.type === 'border-only') {
+            fillOpacity = 0;
+            // Border color is already set via layer.color by the handler
         }
 
         return {
-            color: layer.color, // Border color
-            weight: 2,
+            color: layer.style?.borderColor || layer.color, // Border color preference
+            weight: layer.style?.weight || 2,
             opacity: layer.opacity,
             fillColor: fillColor,
-            fillOpacity: layer.opacity * 0.5,
+            fillOpacity: fillOpacity,
         };
     };
 
@@ -163,7 +166,6 @@ export const MapViewer: React.FC = () => {
             className="w-full h-full bg-slate-100"
         >
             <MapController />
-            <Legend />
             <TileLayer attribution={attribution} url={tileUrl} />
 
             {/* Render non-point layers normally */}

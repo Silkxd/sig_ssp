@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import type { FeatureCollection } from 'geojson';
 import { CacheService } from './CacheService';
+import { ProxyService } from './ProxyService';
 
 export const DbService = {
     /**
@@ -22,19 +23,21 @@ export const DbService = {
 
             if (collectionError) throw collectionError;
 
-            // 2. Prepare Features
-            const features = geojson.features.map((feature) => ({
-                collection_id: collection.id,
-                geom: feature.geometry,
-                properties: feature.properties,
-            }));
+            // 2. Prepare & Insert Features (ONLY if not an external connection)
+            if (!metadata.connectionConfig) {
+                const features = geojson.features.map((feature) => ({
+                    collection_id: collection.id,
+                    geom: feature.geometry,
+                    properties: feature.properties,
+                }));
 
-            // 3. Insert Features (Batch)
-            const { error: featuresError } = await supabase
-                .from('features')
-                .insert(features);
+                // 3. Insert Features (Batch)
+                const { error: featuresError } = await supabase
+                    .from('features')
+                    .insert(features);
 
-            if (featuresError) throw featuresError;
+                if (featuresError) throw featuresError;
+            }
 
             // Cache the new layer immediately
             await CacheService.set(collection.id, {
@@ -46,7 +49,8 @@ export const DbService = {
                 opacity: 1,
                 color: '#3b82f6',
                 type: 'database',
-                style: metadata?.style
+                style: metadata?.style,
+                connectionConfig: metadata?.connectionConfig
             });
 
             return collection;
@@ -89,32 +93,50 @@ export const DbService = {
                             return { ...updatedLayer, visible: true };
                         }
 
-                        return { ...updatedLayer, style: col.metadata?.style, visible: true };
+                        // Style changed in DB? Update cache object with new style AND color
+                        return {
+                            ...updatedLayer,
+                            style: col.metadata?.style,
+                            color: col.metadata?.style?.color || updatedLayer.color,
+                            visible: true
+                        };
                     }
                 } catch (e) {
                     console.warn('Erro de leitura do cache, voltando para a rede', e);
                 }
 
-                // B. Fallback: Fetch Features from Network
-                const { data: features, error: featuresError } = await supabase
-                    .from('features')
-                    .select('geom, properties')
-                    .eq('collection_id', col.id);
+                // B. Fallback: Fetch Features from Network (Supabase or External Proxy)
+                let geojson: FeatureCollection;
 
-                if (featuresError) {
-                    console.error(`Erro ao buscar feições para a coleção ${col.id}:`, featuresError);
-                    return null;
+                if (col.metadata?.connectionConfig) {
+                    // External Layer: Fetch live from proxy
+                    try {
+                        geojson = await ProxyService.fetchExternalLayer(col.metadata.connectionConfig);
+                    } catch (err) {
+                        console.error(`Failed to fetch external layer ${col.name}:`, err);
+                        geojson = { type: 'FeatureCollection', features: [] };
+                    }
+                } else {
+                    // Internal Layer: Fetch from Supabase 'features' table
+                    const { data: features, error: featuresError } = await supabase
+                        .from('features')
+                        .select('geom, properties')
+                        .eq('collection_id', col.id);
+
+                    if (featuresError) {
+                        console.error(`Erro ao buscar feições para a coleção ${col.id}:`, featuresError);
+                        return null;
+                    }
+
+                    geojson = {
+                        type: 'FeatureCollection',
+                        features: features.map((f: any) => ({
+                            type: 'Feature',
+                            geometry: f.geom,
+                            properties: f.properties,
+                        })),
+                    };
                 }
-
-                // Reconstruct GeoJSON
-                const geojson: FeatureCollection = {
-                    type: 'FeatureCollection',
-                    features: features.map((f: any) => ({
-                        type: 'Feature',
-                        geometry: f.geom,
-                        properties: f.properties,
-                    })),
-                };
 
                 const newLayer = {
                     id: col.id,
@@ -123,13 +145,16 @@ export const DbService = {
                     data: geojson,
                     visible: true,
                     opacity: 1,
-                    color: '#3b82f6',
+                    color: col.metadata?.style?.color || '#3b82f6',
                     type: 'database',
-                    style: col.metadata?.style
+                    style: col.metadata?.style,
+                    connectionConfig: col.metadata?.connectionConfig
                 };
 
                 // C. Update Cache
-                await CacheService.set(col.id, newLayer);
+                if (geojson.features.length > 0) {
+                    await CacheService.set(col.id, newLayer);
+                }
 
                 return newLayer;
             });
@@ -195,7 +220,11 @@ export const DbService = {
             // Update Cache with new style (without re-fetching all features)
             const cachedLayer = await CacheService.get(collectionId);
             if (cachedLayer) {
-                await CacheService.set(collectionId, { ...cachedLayer, style });
+                await CacheService.set(collectionId, {
+                    ...cachedLayer,
+                    style,
+                    color: style?.color || cachedLayer.color // Sync color to top-level property
+                });
             }
 
             return true;

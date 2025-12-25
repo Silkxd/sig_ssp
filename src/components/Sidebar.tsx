@@ -5,8 +5,10 @@ import { FileService } from '../utils/FileService';
 import { DbService } from '../utils/DbService';
 import { FieldSelectionModal } from './FieldSelectionModal';
 import { StyleOptionsModal } from './StyleOptionsModal';
+import { ClassificationEditorModal } from './ClassificationEditorModal';
+import { ExternalLayerModal } from './ExternalLayerModal';
 import { LayerRow } from './LayerRow';
-import { Layers, Eye, EyeOff, Trash2, Loader2, ZoomIn, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, FileUp } from 'lucide-react';
+import { Layers, Eye, EyeOff, Trash2, Loader2, ZoomIn, FolderPlus, Folder, FolderOpen, ChevronRight, ChevronDown, FileUp, Database } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
     const {
@@ -18,6 +20,20 @@ export const Sidebar: React.FC = () => {
     } = useMapStore();
 
     const [loading, setLoading] = useState(false);
+
+    // Modal & Editor States
+    const [groupModalOpen, setGroupModalOpen] = useState(false);
+    const [styleModalOpen, setStyleModalOpen] = useState(false);
+    const [fieldModalOpen, setFieldModalOpen] = useState(false);
+    const [selectedLayer, setSelectedLayer] = useState<MapLayer | null>(null);
+    const [classificationFields, setClassificationFields] = useState<string[]>([]);
+
+    // Classification Editor State
+    const [classificationEditorOpen, setClassificationEditorOpen] = useState(false);
+    const [editorPendingField, setEditorPendingField] = useState<string>('');
+    const [editorValues, setEditorValues] = useState<string[]>([]);
+    const [editorInitialMap, setEditorInitialMap] = useState<Record<string, string>>({});
+    const [externalModalOpen, setExternalModalOpen] = useState(false);
 
     // Initial Load of Groups
     useEffect(() => {
@@ -39,6 +55,17 @@ export const Sidebar: React.FC = () => {
         };
         loadGroups();
     }, []);
+
+    // --- Helper to extract values ---
+    const extractUniqueValues = (layer: MapLayer, field: string): string[] => {
+        const uniqueValues = new Set<string>();
+        layer.data.features.forEach((f) => {
+            if (f.properties && f.properties[field] !== undefined && f.properties[field] !== null) {
+                uniqueValues.add(String(f.properties[field]));
+            }
+        });
+        return Array.from(uniqueValues).sort();
+    };
 
     // --- Actions with Modals ---
 
@@ -132,7 +159,9 @@ export const Sidebar: React.FC = () => {
                 try {
                     await DbService.saveLayerToDatabase(layer.name, layer.data, {
                         savedAt: new Date().toISOString(),
-                        originalId: layer.id
+                        originalId: layer.id,
+                        style: layer.style, // Save current style
+                        connectionConfig: layer.connectionConfig // Save connection config
                     }, layer.groupId);
                     openModal({ type: 'alert', title: 'Sucesso', message: 'Camada salva com sucesso!' });
                 } catch (e) {
@@ -199,11 +228,8 @@ export const Sidebar: React.FC = () => {
     }, [searchQuery, layers]);
 
     // Classification & Style Logic
-    const [fieldModalOpen, setFieldModalOpen] = useState(false);
-    const [styleModalOpen, setStyleModalOpen] = useState(false);
-    const [selectedLayer, setSelectedLayer] = useState<MapLayer | null>(null);
-    const [classificationFields, setClassificationFields] = useState<string[]>([]);
-
+    // Classification & Style Logic
+    // States moved to top of component
     const getRandomColor = () => {
         const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#d946ef'];
         return colors[Math.floor(Math.random() * colors.length)];
@@ -250,8 +276,23 @@ export const Sidebar: React.FC = () => {
     };
 
     const openStyleOptions = (layer: MapLayer) => {
-        setSelectedLayer(layer);
-        setStyleModalOpen(true);
+        // If layer is already classified, open the Classification Editor directly
+        if (layer.style?.type === 'categorized' && layer.style.field) {
+            setSelectedLayer(layer);
+            setEditorPendingField(layer.style.field);
+            setEditorValues(extractUniqueValues(layer, layer.style.field));
+            setEditorInitialMap(layer.style.classMap || {});
+            // Check for initial border color
+            // layer.style.borderColor might exist now
+            // I need to set a state for initialBorderColor if I added it to Sidebar state?
+            // Actually I can just pass it directly if I update the state object for editor props
+            // Need to add state for initialBorderColor in Sidebar
+            setClassificationEditorOpen(true);
+        } else {
+            // Otherwise open the standard style options (Simple / Border Only / or start new Classification)
+            setSelectedLayer(layer);
+            setStyleModalOpen(true);
+        }
     };
 
     const handleClassifyLayer = (layer: MapLayer) => {
@@ -263,38 +304,46 @@ export const Sidebar: React.FC = () => {
         setFieldModalOpen(true);
     };
 
-    const handleColorChange = async (color: string) => {
+    const handleColorChange = async (color: string, weight: number) => {
         if (!selectedLayer) return;
 
         updateLayerColor(selectedLayer.id, color);
 
+        const newStyle = {
+            type: 'simple' as const,
+            color: color,
+            weight: weight
+        };
+        useMapStore.getState().setLayerStyle(selectedLayer.id, newStyle);
+
         if (selectedLayer.type === 'database') {
             try {
-                // Fetch current style, update simple color (or revert to simple if it was categorized?)
-                // Assuming we want to switch to simple style with this color
-                const newStyle = {
-                    type: 'simple',
-                    color: color
-                };
-                // We don't have a direct 'updateColor' in DbService that just updates one field easily 
-                // without touching style structure, handled via updateLayerStyle usually.
-                // But wait, the layer COLOR property in the DB is not fully separate from style in our 
-                // simplified logic? Actually DbService.updateLayerStyle updates the 'metadata.style' field.
-                // Our Store has 'color' property on the layer object, but also 'style' object.
-                // Let's decide: Simple color change updates the layer.color on the map AND 
-                // saves it as a 'simple' style preference in DB so next load it persists.
-
                 await DbService.updateLayerStyle(selectedLayer.id, newStyle);
-
-                // Also need to "reset" the local layer style to avoid Legend showing categories
-                // This is handled by useMapStore.updateLayerColor? 
-                // No, updateLayerColor just changes the hex string. 
-                // We might need to clear the categorization style in the store too if we are switching to single color.
-                // Ideally we should have a 'resetStyle' action or 'setSimpleStyle'.
-                // For now, let's keep it simple: Changing color updates the visual. 
-                // If it was categorized, it might look weird if we don't clear categories.
             } catch (e) {
                 console.error("Failed to save color preference", e);
+            }
+        }
+    };
+
+    const handleBorderOnly = async (color: string, weight: number) => {
+        if (!selectedLayer) return;
+
+        setFocusedLayer(null);
+        updateLayerColor(selectedLayer.id, color);
+
+        const newStyle = {
+            type: 'border-only' as const,
+            color: color,
+            weight: weight
+        };
+
+        useMapStore.getState().setLayerStyle(selectedLayer.id, newStyle);
+
+        if (selectedLayer.type === 'database') {
+            try {
+                await DbService.updateLayerStyle(selectedLayer.id, newStyle);
+            } catch (e) {
+                console.error("Failed to save border-only preference", e);
             }
         }
     };
@@ -356,6 +405,14 @@ export const Sidebar: React.FC = () => {
                                 Importar Arquivo
                                 <input type="file" className="hidden" accept=".geojson,.json,.kml,.kmz,.zip" onChange={handleFileUpload} />
                             </label>
+
+                            <button
+                                onClick={() => setExternalModalOpen(true)}
+                                className="w-full mt-2 py-2 px-3 bg-white border border-slate-200 rounded-lg text-sm text-slate-600 hover:bg-slate-50 hover:text-blue-600 flex items-center justify-center gap-2 transition-colors shadow-sm"
+                            >
+                                <Database size={16} />
+                                Conectar Banco Externo
+                            </button>
                         </div>
                     )}
 
@@ -366,6 +423,14 @@ export const Sidebar: React.FC = () => {
                                 <span>Importar nova camada...</span>
                                 <input type="file" className="hidden" accept=".geojson,.json,.kml,.kmz,.zip" onChange={handleFileUpload} />
                             </label>
+
+                            <button
+                                onClick={() => setExternalModalOpen(true)}
+                                className="w-full mt-2 py-2 px-3 bg-white border border-slate-200 rounded-lg text-sm text-slate-600 hover:bg-slate-50 hover:text-blue-600 flex items-center justify-center gap-2 transition-colors shadow-sm"
+                            >
+                                <Database size={16} />
+                                Conectar Banco Externo
+                            </button>
                         </div>
                     )}
 
@@ -429,7 +494,7 @@ export const Sidebar: React.FC = () => {
                             onMove={handleMoveLayer}
                         />
                     ))}
-                </div>
+                </div >
 
                 <div className="text-[10px] text-center text-slate-400 p-2 border-t border-slate-100">
                     <button onClick={async () => {
@@ -440,12 +505,14 @@ export const Sidebar: React.FC = () => {
                         }
                     }} className="hover:text-red-500 transition-colors">Limpar Cache</button>
                 </div>
-            </div>
+            </div >
 
             <StyleOptionsModal
                 isOpen={styleModalOpen}
                 onClose={() => setStyleModalOpen(false)}
+                currentWeight={selectedLayer?.style?.weight}
                 onSelectColor={handleColorChange}
+                onSelectBorderOnly={handleBorderOnly}
                 onSelectClassify={() => {
                     if (selectedLayer) handleClassifyLayer(selectedLayer);
                 }}
@@ -456,12 +523,65 @@ export const Sidebar: React.FC = () => {
                 onClose={() => setFieldModalOpen(false)}
                 onSelect={(field) => {
                     if (selectedLayer) {
-                        useMapStore.getState().classifyLayer(selectedLayer.id, field);
+                        const values = extractUniqueValues(selectedLayer, field);
+                        setEditorPendingField(field);
+                        setEditorValues(values);
+
+                        // Pre-fill if editing existing classification on same field
+                        let initialMap = {};
+                        if (selectedLayer.style?.type === 'categorized' && selectedLayer.style.field === field && selectedLayer.style.classMap) {
+                            initialMap = selectedLayer.style.classMap;
+                        }
+                        setEditorInitialMap(initialMap);
+
                         setFieldModalOpen(false);
+                        setClassificationEditorOpen(true);
                     }
                 }}
                 fields={classificationFields}
                 layerName={selectedLayer?.name || ''}
+            />
+
+            <ClassificationEditorModal
+                isOpen={classificationEditorOpen}
+                onClose={() => setClassificationEditorOpen(false)}
+                onSave={async (classMap, weight, borderColor) => {
+                    if (selectedLayer && editorPendingField) {
+                        const newStyle = {
+                            type: 'categorized' as const,
+                            field: editorPendingField,
+                            classMap,
+                            weight,
+                            borderColor
+                        };
+
+                        useMapStore.getState().setLayerStyle(selectedLayer.id, newStyle);
+
+                        if (selectedLayer.type === 'database') {
+                            try {
+                                await DbService.updateLayerStyle(selectedLayer.id, newStyle);
+                            } catch (e) {
+                                console.error("Failed to save classification", e);
+                            }
+                        }
+                    }
+                }}
+                onReset={() => {
+                    setClassificationEditorOpen(false);
+                    if (selectedLayer) {
+                        // Open standard options to allow switching back
+                        setStyleModalOpen(true);
+                    }
+                }}
+                field={editorPendingField}
+                uniqueValues={editorValues}
+                initialClassMap={editorInitialMap}
+                initialBorderColor={selectedLayer?.style?.borderColor}
+                layerName={selectedLayer?.name || ''}
+            />
+            <ExternalLayerModal
+                isOpen={externalModalOpen}
+                onClose={() => setExternalModalOpen(false)}
             />
         </>
     );
